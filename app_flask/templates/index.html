@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shape Detector</title>
+
+<!-- ---------------- STYLES (unchanged) ---------------- -->
+<style>
+  :root { --primary:#4e54c8; --secondary:#8f94fb; --accent:#f5af19;
+          --bg:#ede9fe; --card-bg:#ffffff; --text:#333; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;
+    background:linear-gradient(135deg,var(--primary),var(--secondary));
+    color:var(--text);min-height:100vh;padding:2rem
+  }
+  .container{background:var(--card-bg);border-radius:1rem;
+    box-shadow:0 10px 30px rgba(0,0,0,.1);width:100%;overflow:hidden;
+    animation:fadeIn .5s ease-out}
+  header{background:var(--primary);color:#fff;padding:1rem 2rem;
+    font-size:1.5rem;text-align:center}
+  .content{display:flex;flex-wrap:nowrap;align-items:flex-start;padding:2rem}
+  .form-section{flex:1;margin-right:2rem}
+  .form-card{background:var(--bg);padding:1.5rem;border-radius:.5rem;
+    box-shadow:0 5px 15px rgba(0,0,0,.05)}
+  input[type="file"],select,input[type="number"],input[readonly]{
+    width:100%;padding:.5rem;margin:.5rem 0;border:1px solid #ccc;
+    border-radius:.25rem;transition:border-color .2s}
+  input:focus,select:focus,input[type="number"]:focus{
+    border-color:var(--accent);outline:none}
+  button{
+    background:linear-gradient(135deg,var(--accent),var(--primary));
+    border:none;color:#fff;padding:.75rem 1.5rem;border-radius:.5rem;
+    font-size:1rem;cursor:pointer;box-shadow:0 5px 15px rgba(0,0,0,.1);
+    transition:transform .2s;margin-top:1rem}
+  button:hover:not([disabled]){transform:scale(1.05)}
+  button[disabled]{opacity:.5;cursor:not-allowed}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 rgba(0,0,0,0)}
+                   50%{box-shadow:0 0 10px var(--accent)}}
+  .pulse{animation:pulse 1s ease-out 3}
+  .image-preview{margin-top:1.5rem}
+  img.preview{max-width:100%;border-radius:.5rem;
+    box-shadow:0 5px 15px rgba(0,0,0,.1);cursor:crosshair}
+  .colors-section{width:auto}
+  .colors-column{display:grid;
+    grid-template-columns:repeat(3,100px);grid-auto-rows:100px;gap:20px}
+  .color-box{width:100px;height:100px;border-radius:.5rem;display:flex;
+    justify-content:center;align-items:center;color:#fff;font-weight:bold;
+    font-size:12px;text-shadow:1px 1px 2px rgba(0,0,0,.7)}
+  .highlighted{outline:4px solid var(--accent)}
+  .click-message{margin-top:1rem;font-size:1rem;color:var(--primary);
+    text-align:center;min-height:1.2em}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .recipe-section{margin-top:2rem}
+  .recipe{background:var(--bg);border:1px solid #ccc;border-radius:.5rem;
+    padding:1rem;margin-bottom:1rem}
+  .recipe-content{display:flex;align-items:center;gap:1rem;margin-top:.5rem}
+  .recipe-color{width:50px;height:50px;border-radius:.25rem}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>Shape Detector</header>
+
+  <div class="content">
+
+    <!-- ------------- Upload + decode panel ------------- -->
+    <div class="form-section">
+      <div class="form-card">
+        <form method="post" enctype="multipart/form-data">
+          <label>Upload Image:</label>
+          <input type="file" name="image" accept="image/png, image/jpeg" required>
+
+          <label>Shape:</label>
+          <select name="shape">
+            <option {% if request.form.shape=='Triangle' %}selected{% endif %}>Triangle</option>
+            <option {% if request.form.shape=='Rectangle' %}selected{% endif %}>Rectangle</option>
+            <option {% if request.form.shape=='Circle' %}selected{% endif %}>Circle</option>
+          </select>
+
+          <label>Min Size:</label>
+          <input type="number" name="min_size" value="{{ request.form.min_size or 3 }}" min="1">
+
+          <label>Max Size:</label>
+          <input type="number" name="max_size" value="{{ request.form.max_size or 10 }}" min="1">
+
+          <button type="submit" name="action" value="decode">Decode</button>
+        </form>
+      </div>
+
+{% if decoded_image %}
+
+      <!-- ------------- Annotated image preview ------------- -->
+      <div class="image-preview">
+        <img id="detectedImage" class="preview"
+             src="data:image/png;base64,{{ decoded_image }}"
+             alt="Detected result">
+        <button id="downloadBtn">Download PNG</button>
+        <div id="clickMessage" class="click-message"></div>
+      </div>
+
+      <!-- ------------- Recipe generator form ------------- -->
+      <form id="recipeForm" class="form-card" style="margin-top:1.5rem;">
+        <input type="hidden" name="base_color" id="baseColor">
+
+        <label>Selected RGB:</label>
+        <input type="text" id="rgbDisplay" readonly placeholder="Click a swatch…">
+
+        <label>Choose colour‑database:</label>
+        <select name="db_choice">
+          {% for db in dbs %}
+          <option value="{{ db }}">{{ db }}</option>
+          {% endfor %}
+        </select>
+
+        <label>Step size (bigger = faster, smaller = finer):</label>
+        <input type="number" name="step" value="10" min="1" max="50">
+
+        <button id="generateBtn" type="submit" disabled>Generate Recipe</button>
+      </form>
+
+      <!-- where JS injects results -->
+      <div id="recipeSection" class="recipe-section"></div>
+
+{% endif %}
+    </div><!-- /.form-section -->
+
+{% if decoded_image %}
+    <!-- ------------- colour swatches ------------- -->
+    <div class="colors-section">
+      <div class="colors-column">
+        {% for color, cnt in colors %}
+        <div class="color-box"
+             style="background-color: rgb({{ color[0] }}, {{ color[1] }}, {{ color[2] }});">
+          {{ color[0] }}, {{ color[1] }}, {{ color[2] }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+{% endif %}
+  </div><!-- /.content -->
+</div><!-- /.container -->
+
+{% if decoded_image %}
+<!-- ---------------- SCRIPT block ---------------- -->
+<script>
+const img         = document.getElementById('detectedImage');
+const msgDiv      = document.getElementById('clickMessage');
+const boxes       = Array.from(document.querySelectorAll('.color-box'));
+const baseColorEl = document.getElementById('baseColor');
+const rgbDisplay  = document.getElementById('rgbDisplay');
+const genBtn      = document.getElementById('generateBtn');
+
+const THRESHOLD = 10;
+const parseRGB = txt => txt.trim().split(',').map(Number);
+const dist = (r1,g1,b1,r2,g2,b2) => Math.hypot(r1-r2,g1-g2,b1-b2);
+
+/* canvas for pixel sampling */
+const canvas = document.createElement('canvas');
+const ctx    = canvas.getContext('2d');
+function copyToCanvas(){
+  if(!img.naturalWidth) return;
+  canvas.width  = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  ctx.drawImage(img,0,0);
+}
+img.addEventListener('load', copyToCanvas);
+copyToCanvas();
+
+/* --------- click on image → highlight swatch --------- */
+img.addEventListener('click', e=>{
+  const r = img.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) * (img.naturalWidth  / img.width));
+  const y = Math.floor((e.clientY - r.top ) * (img.naturalHeight / img.height));
+  const [R,G,B] = ctx.getImageData(x,y,1,1).data;
+
+  boxes.forEach(b=>b.classList.remove('highlighted'));
+  let found = false;
+  for(const box of boxes){
+    const [rBox,gBox,bBox] = parseRGB(box.textContent);
+    if(dist(R,G,B,rBox,gBox,bBox)<THRESHOLD){
+      found = true;
+      box.classList.add('highlighted');
+      const rgbStr = `${rBox},${gBox},${bBox}`;
+      baseColorEl.value = rgbStr;
+      rgbDisplay.value  = rgbStr;
+      genBtn.disabled = false;
+      genBtn.classList.add('pulse');
+      setTimeout(()=>genBtn.classList.remove('pulse'),1500);
+      break;
+    }
+  }
+  msgDiv.textContent = found ? `FOUND (${R}, ${G}, ${B})` : 'NOT FOUND';
+  if(!found){
+    baseColorEl.value=''; rgbDisplay.value=''; genBtn.disabled=true;
+  }
+});
+
+/* --------- download helper --------- */
+document.getElementById('downloadBtn').addEventListener('click', e=>{
+  e.preventDefault();
+  const bin  = atob("{{ decoded_image }}");
+  const arr  = Uint8Array.from([...bin].map(c=>c.charCodeAt(0)));
+  const blob = new Blob([arr],{type:'image/png'});
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'),
+                             {href:url,download:'decoded.png'});
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* --------- AJAX recipe form --------- */
+document.getElementById('recipeForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  if(genBtn.disabled) return;
+
+  const formData = new FormData(e.target);
+  genBtn.textContent='Generating…'; genBtn.disabled=true;
+
+  try{
+    const res  = await fetch('/generate_recipe',{method:'POST',body:formData});
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.msg || 'Server error');
+
+    const out = json.recipes.map(r=>{
+      const items = r.recipe.map(i=>`<li>${i.name}: ${i.perc}%</li>`).join('');
+      return `
+        <div class="recipe">
+          <strong>Error:</strong> ${r.error.toFixed(2)}<br>
+          <div class="recipe-content">
+            <div class="recipe-color" style="background: rgb(${r.mix});"></div>
+            <ul>${items}</ul>
+          </div>
+        </div>`;
+    }).join('');
+    document.getElementById('recipeSection').innerHTML =
+      `<h3>Top 3 Paint Recipes</h3>${out}`;
+
+  }catch(err){
+    alert('Failed: '+err.message);
+  }finally{
+    genBtn.textContent='Generate Recipe';
+    genBtn.disabled=false;
+  }
+});
+</script>
+{% endif %}
+</body>
+</html>

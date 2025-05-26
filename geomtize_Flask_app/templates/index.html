@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Geometrize Demo</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+        rel="stylesheet">
+
+  <style>
+    :root {
+      --primary-color: #5e72e4;
+      --success-color: #2dce89;
+      --info-color: #11cdef;
+      --danger-color: #f5365c;
+      --warning-color: #fb6340;
+      --background-start: #74ABE2;
+      --background-end: #5563DE;
+      --text-color: #2c3e50;
+      --card-bg: #ffffff;
+    }
+    body {
+      background: linear-gradient(135deg, var(--background-start), var(--background-end));
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--text-color);
+      margin: 0; padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      background: var(--card-bg);
+      border-radius: 1rem;
+      padding: 2rem;
+      margin: 2rem auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    }
+    h1 {
+      color: var(--primary-color);
+      text-align: center;
+      font-weight: 700;
+    }
+    .btn {
+      border-radius: 2rem;
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      transition: transform 0.2s ease, background-color 0.2s ease;
+      margin-right: 0.5rem;
+    }
+    .btn:hover { transform: translateY(-2px); }
+    .btn-primary { background-color: var(--primary-color); border-color: var(--primary-color); color: white; }
+    .btn-success { background-color: var(--success-color); border-color: var(--success-color); color: white; }
+    .btn-info    { background-color: var(--info-color);    border-color: var(--info-color);    color: white; }
+    .btn-danger  { background-color: var(--danger-color);  border-color: var(--danger-color);  color: white; }
+    .btn-warning { background-color: var(--warning-color); border-color: var(--warning-color); color: white; }
+    .btn-dark    { background-color: #343a40; border-color: #343a40; color: white; }
+    .btn-dark:hover { background-color: #23272b; }
+
+    #stepSlider {
+      appearance: none; height: 10px; border-radius: 5px; background: #e0e0e0;
+    }
+    #stepSlider::-webkit-slider-thumb {
+      appearance: none; width: 24px; height: 24px; border-radius: 50%;
+      background: var(--primary-color); cursor: pointer; transition: background 0.3s ease;
+    }
+    #stepSlider::-webkit-slider-thumb:hover { background: #324cdd; }
+
+    #stepLabel {
+      width: auto; min-width: 4ch; text-align: center; font-size: 1rem;
+      border: 1px solid #ccc; border-radius: 0.5rem; padding: 0.2rem 0.4rem;
+      margin-left: 0.5rem; background: white;
+    }
+    #pixelInfo {
+      margin-top: 1rem; font-weight: 600; text-align: center;
+    }
+    #loadingOverlay {
+      position: fixed; top:0; left:0; width:100%; height:100%;
+      background: rgba(255,255,255,0.9); display:none;
+      align-items: center; justify-content: center; z-index:1000;
+    }
+    #loadingOverlay .progress {
+      width:60%; height:2.5rem; border-radius:1rem; background:#f1f3f5;
+    }
+    #loadingOverlay .progress-bar {
+      background-color: var(--primary-color);
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingOverlay">
+    <div class="progress">
+      <div class="progress-bar progress-bar-striped progress-bar-animated"
+           role="progressbar" style="width:100%"></div>
+    </div>
+  </div>
+
+  <div class="container">
+    <h1 class="mb-4">Image Processing App</h1>
+
+    <form method="post" enctype="multipart/form-data" class="mb-4">
+      <input type="hidden" name="geom" value="1">
+      {% if still_png %}
+        <input type="hidden" name="prev_image_b64"   value="{{ still_png }}">
+        <input type="hidden" name="prev_shapes_json" value='{{ shapes_json|tojson }}'>
+        <input type="hidden" name="prev_dims"        value='{{ dims|tojson }}'>
+        <input type="hidden" name="prev_runtime"     value="{{ runtime }}">
+        <input type="hidden" name="prev_max_step"    value="{{ max_step }}">
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label">Upload Image</label>
+        <input type="file" class="form-control" name="image" accept="image/*" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Shape Type</label>
+        <select class="form-select" name="shape_type">
+          <option value="triangle"  {{ 'selected' if shape_type=='triangle'  else '' }}>triangle</option>
+          <option value="rectangle" {{ 'selected' if shape_type=='rectangle' else '' }}>rectangle</option>
+          <option value="ellipse"   {{ 'selected' if shape_type=='ellipse'   else '' }}>ellipse</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Number of Shapes</label>
+        <input type="number" class="form-control" name="shape_count" min="1" value="{{ shape_count }}">
+      </div>
+      <div class="row mb-4">
+        <div class="col">
+          <label class="form-label">New Width</label>
+          <input type="number" class="form-control" name="new_width" min="1" value="{{ new_width }}">
+        </div>
+        <div class="col">
+          <label class="form-label">New Height</label>
+          <input type="number" class="form-control" name="new_height" min="1" value="{{ new_height }}">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">Process Image</button>
+    </form>
+
+    {% if shapes_json %}
+      <hr>
+      <p><strong>Server processing time:</strong> {{ runtime }} s</p>
+      <img src="data:image/png;base64,{{ still_png }}"
+           class="img-fluid border rounded mb-4" alt="Result">
+
+      <textarea id="shapeData" class="d-none">{{ shapes_json|tojson }}</textarea>
+      <textarea id="dims"      class="d-none">{{ dims|tojson }}</textarea>
+
+      <div class="text-center mb-3">
+        <button id="btnBottom" class="btn btn-primary">Bottom-Up</button>
+        <button id="btnUp"     class="btn btn-success">Top-Down</button>
+        <button id="btnDark"   class="btn btn-dark">Dark First</button>
+        <button id="btnLight"  class="btn btn-warning">Light First</button>
+        <label class="form-check-label ms-3">
+          <input type="checkbox" id="chkMaintain" class="form-check-input me-1" checked>
+          Maintain stacking
+        </label>
+      </div>
+
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <button type="button" id="playPauseBtn" class="btn btn-info">Start simulation</button>
+        <input  id="stepSlider" class="form-range flex-grow-1"
+                type="range" min="0" max="{{ max_step }}" value="0" disabled>
+        <input  id="stepLabel"  type="number" size="4" value="0"
+                min="0" max="{{ max_step }}">
+        <button type="button" id="btnDownload" class="btn btn-danger ms-2">Download JSON</button>
+      </div>
+
+      <div id="canvasHolder"></div>
+      <div id="pixelInfo">Click on the canvas above to see RGB values</div>
+
+      <!-- Recipe controls -->
+      <div id="recipeControls" class="mt-4 text-center">
+        <div class="row g-2 justify-content-center">
+          <div class="col-auto">
+            <select id="dbChoice" class="form-select">
+              {% for db in dbs %}<option value="{{ db }}">{{ db }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-auto">
+            <input id="stepInput" type="number" class="form-control" min="1" value="10" title="Step %">
+          </div>
+          <div class="col-auto">
+            <button type="button" id="btnRecipe" class="btn btn-info">Get Color Recipe</button>
+          </div>
+        </div>
+      </div>
+      <div id="recipeResults" class="row mt-3"></div>
+    {% endif %}
+  </div>
+
+  <script>
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelector("form").addEventListener("submit", () => {
+      document.getElementById("loadingOverlay").style.display = "flex";
+    });
+
+    const original = JSON.parse(document.getElementById("shapeData").value)
+                       .map((s,i)=>{ 
+                         s._orig = i;
+                         if (s.type==="triangle") {
+                           const ys = s.points.map(p=>p[1]);
+                           s.centroidY = (ys[0]+ys[1]+ys[2]) / 3;
+                         } else {
+                           s.centroidY = (s.y1 + s.y2) / 2;
+                         }
+                         return s;
+                       });
+    let shapes = original.slice();
+    const [W,H] = JSON.parse(document.getElementById("dims").value);
+
+    const slider      = document.getElementById("stepSlider");
+    const label       = document.getElementById("stepLabel");
+    const maxStep     = shapes.length;
+    let   currentStep = 0;
+    let   lastColor   = null;
+    const playBtn     = document.getElementById("playPauseBtn");
+    const downloadBtn = document.getElementById("btnDownload");
+    const recipeBtn   = document.getElementById("btnRecipe");
+    const recipeRes   = document.getElementById("recipeResults");
+    const chkMaintain = document.getElementById("chkMaintain");
+
+    slider.max = maxStep;
+    label.max  = maxStep;
+
+    const dpr = window.devicePixelRatio || 1;
+    const canvas = document.createElement("canvas");
+    canvas.width  = W*dpr;
+    canvas.height = H*dpr;
+    canvas.style.width  = `${W}px`;
+    canvas.style.height = `${H}px`;
+    canvas.style.cursor = 'crosshair';
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    document.getElementById("canvasHolder").appendChild(canvas);
+    requestAnimationFrame(() => canvas.classList.add("ready"));
+
+    function drawShape(s) {
+      ctx.fillStyle = `rgba(${s.color[0]},${s.color[1]},${s.color[2]},${s.color[3]/255})`;
+      if (s.type==="triangle") {
+        ctx.beginPath();
+        ctx.moveTo(...s.points[0]);
+        ctx.lineTo(...s.points[1]);
+        ctx.lineTo(...s.points[2]);
+        ctx.closePath();
+        ctx.fill();
+      } else if (s.type==="rectangle") {
+        ctx.fillRect(
+          Math.min(s.x1,s.x2),
+          Math.min(s.y1,s.y2),
+          Math.abs(s.x2-s.x1),
+          Math.abs(s.y2-s.y1)
+        );
+      } else {
+        ctx.beginPath();
+        ctx.ellipse(
+          (s.x1+s.x2)/2, (s.y1+s.y2)/2,
+          Math.abs((s.x2-s.x1)/2), Math.abs((s.y2-s.y1)/2),
+          0,0,Math.PI*2
+        );
+        ctx.fill();
+      }
+    }
+
+    function renderFull(n) {
+      ctx.clearRect(0,0,W,H);
+      shapes.slice(0,n).forEach(drawShape);
+    }
+
+    canvas.addEventListener("click", e => {
+      const x = Math.floor(e.offsetX * dpr), y = Math.floor(e.offsetY * dpr);
+      const [r,g,b] = ctx.getImageData(x,y,1,1).data;
+      lastColor = [r,g,b];
+      document.getElementById("pixelInfo").textContent =
+        `RGB: (${r}, ${g}, ${b}) at (${Math.floor(e.offsetX)}, ${Math.floor(e.offsetY)})`;
+    });
+
+    slider.disabled = false;
+    slider.addEventListener("input", () => {
+      currentStep = +slider.value;
+      label.value  = currentStep;
+      renderFull(currentStep);
+    });
+    label.addEventListener("change", () => {
+      let v = Math.min(maxStep, Math.max(0, +label.value||0));
+      currentStep = v;
+      slider.value = v;
+      label.value  = v;
+      renderFull(v);
+    });
+
+    function resetSim() {
+      currentStep = 0;
+      slider.value = 0;
+      label.value  = 0;
+      renderFull(0);
+    }
+
+    document.getElementById("btnBottom").addEventListener("click", () => {
+      shapes = original.slice().sort((a,b)=> b.centroidY - a.centroidY);
+      chkMaintain.checked = false;
+      resetSim();
+    });
+    document.getElementById("btnUp").addEventListener("click", () => {
+      shapes = original.slice().sort((a,b)=> a.centroidY - b.centroidY);
+      chkMaintain.checked = false;
+      resetSim();
+    });
+    document.getElementById("btnDark").addEventListener("click", () => {
+      shapes = original.slice().sort((a,b)=>{
+        const bri = s=>(s.color[0]+s.color[1]+s.color[2])/3;
+        return bri(a) - bri(b);
+      });
+      chkMaintain.checked = false;
+      resetSim();
+    });
+    document.getElementById("btnLight").addEventListener("click", () => {
+      shapes = original.slice().sort((a,b)=>{
+        const bri = s=>(s.color[0]+s.color[1]+s.color[2])/3;
+        return bri(b) - bri(a);
+      });
+      chkMaintain.checked = false;
+      resetSim();
+    });
+
+    chkMaintain.addEventListener("change", () => {
+      if (chkMaintain.checked) {
+        shapes = original.slice();
+        resetSim();
+      }
+    });
+
+    let intervalId = null;
+    playBtn.addEventListener("click", () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+        playBtn.textContent = "Start simulation";
+        playBtn.classList.replace("btn-danger","btn-info");
+      } else {
+        playBtn.textContent = "Pause simulation";
+        playBtn.classList.replace("btn-info","btn-danger");
+        intervalId = setInterval(() => {
+          if (currentStep >= maxStep) {
+            clearInterval(intervalId);
+            intervalId = null;
+            playBtn.textContent = "Start simulation";
+            playBtn.classList.replace("btn-danger","btn-info");
+            return;
+          }
+          currentStep++;
+          slider.value = currentStep;
+          label.value  = currentStep;
+          renderFull(currentStep);
+        }, 100);
+      }
+    });
+
+    // initial draw all shapes so RGB picker works
+    resetSim();
+    currentStep = maxStep;
+    slider.value = maxStep;
+    label.value  = maxStep;
+    renderFull(currentStep);
+
+    downloadBtn.addEventListener("click", () => {
+      const exportShapes = shapes.slice(0, currentStep);
+      const blob = new Blob([JSON.stringify(exportShapes,null,2)],{type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement("a");
+      a.href    = url;
+      a.download= `shapes_layer_${currentStep}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    const COLOR_DBS = {{ dbs|tojson }};
+    function getRGB(name){
+      for(const colList of Object.values(COLOR_DBS))
+        for(const [n,rgb] of colList)
+          if(n===name) return rgb.join(",");
+      return "0,0,0";
+    }
+    recipeBtn.addEventListener("click", ()=>{
+      if(!lastColor) return alert("Click the canvas to pick a color first.");
+      recipeRes.innerHTML = "";
+      const form = new FormData();
+      form.append("base_color", lastColor.join(","));
+      form.append("db_choice", document.getElementById("dbChoice").value);
+      form.append("step", document.getElementById("stepInput").value);
+      fetch("/generate_recipe", { method:"POST", body: form })
+        .then(r=>r.json())
+        .then(data=>{
+          if(!data.ok) throw new Error(data.msg||"Error generating recipes");
+          data.recipes.forEach((rec,i)=>{
+            const col = document.createElement("div");
+            col.className = "col-md-4 mb-3";
+            col.innerHTML = `
+              <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">Recipe ${i+1}</h5>
+                  <p class="card-text"><strong>Error:</strong> ${rec.error}</p>
+                  <ul class="list-unstyled mb-2">
+                    ${rec.recipe.map(item=>`
+                      <li>
+                        <span style="
+                          display:inline-block;
+                          width:1rem;height:1rem;
+                          background:rgb(${getRGB(item.name)});
+                          margin-right:0.5rem;
+                          border:1px solid #ccc;
+                          vertical-align:middle;"></span>
+                        ${item.name}: ${item.perc}%
+                      </li>`).join("")}
+                  </ul>
+                  <p><strong>Mixed:</strong>
+                    <span style="
+                      display:inline-block;
+                      width:1.5rem;height:1.5rem;
+                      background:rgb(${rec.mix.join(",")});
+                      border:1px solid #ccc;
+                      vertical-align:middle;"></span>
+                    (${rec.mix.join(", ")})
+                  </p>
+                </div>
+              </div>`;
+            recipeRes.appendChild(col);
+          });
+        })
+        .catch(e=>alert(e.message));
+    });
+  });
+  </script>
+</body>
+</html>
